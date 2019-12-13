@@ -9,9 +9,9 @@ func TestParseSelfLink(t *testing.T) {
 		Expected    *SelfLink
 		ShouldError bool
 	}{
-		"":                                            {ShouldError: true},
-		"not/a/real/link":                             {ShouldError: true},
-		"//fullresourcename.google.com/foo/A":         {ShouldError: true},
+		"":                                    {ShouldError: true},
+		"not/a/real/link":                     {ShouldError: true},
+		"//fullresourcename.google.com/foo/A": {ShouldError: true},
 		"https://aprojectlesslink.com/v1/foo/A/bar/B": {ShouldError: true},
 		"https://validlink.com/v1/projects/A/foos/B": {
 			ShouldError: false,
@@ -54,9 +54,9 @@ func TestParseFullResourceName(t *testing.T) {
 		Expected    *FullResourceName
 		ShouldError bool
 	}{
-		"":                                          {ShouldError: true},
-		"not/a/real/link":                           {ShouldError: true},
-		"https://aselflink.com/v1/foo/A/bar/B":      {ShouldError: true},
+		"":                                     {ShouldError: true},
+		"not/a/real/link":                      {ShouldError: true},
+		"https://aselflink.com/v1/foo/A/bar/B": {ShouldError: true},
 		"https://a.fake.service.com/v1/foo/A/bar/B": {ShouldError: true},
 		"//aservice.googleapis.com/foos/A/bars/B": {
 			ShouldError: false,

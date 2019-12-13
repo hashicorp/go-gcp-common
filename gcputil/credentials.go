@@ -15,7 +15,6 @@ import (
 	"golang.org/x/oauth2/jwt"
 	"google.golang.org/api/googleapi"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -146,7 +145,6 @@ func PublicKey(pemString string) (interface{}, error) {
 
 func ServiceAccountPublicKey(serviceAccount string, keyId string) (interface{}, error) {
 	keyUrl := fmt.Sprintf(serviceAccountPublicKeyUrlTemplate, url.PathEscape(serviceAccount))
-	log.Printf("keyUrl %s", keyUrl)
 	res, err := cleanhttp.DefaultClient().Get(keyUrl)
 	if err != nil {
 		return nil, err

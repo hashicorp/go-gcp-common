@@ -22,9 +22,12 @@ import (
 )
 
 const (
-	labelRegex                         string = "^(?P<key>[a-z]([\\w-]+)?):(?P<value>[\\w-]*)$"
 	defaultHomeCredentialsFile                = ".gcp/credentials"
+
+	// Global URL: https://cloud.google.com/iam/docs/creating-managing-service-account-keys
 	serviceAccountPublicKeyUrlTemplate        = "https://www.googleapis.com/service_accounts/v1/metadata/x509/%s?alt=json"
+
+	// Global URL: Base URL from golang.org/x/oauth2, v1 returns x509 keys
 	googleOauthProviderX509CertUrl            = "https://www.googleapis.com/oauth2/v1/certs"
 )
 
@@ -157,11 +160,16 @@ func ServiceAccountPublicKey(serviceAccount string, keyId string) (interface{}, 
 	if err := json.NewDecoder(res.Body).Decode(&jwks); err != nil {
 		return nil, fmt.Errorf("unable to decode JSON response: %v", err)
 	}
-	k, ok := jwks[keyId]
+	kRaw, ok := jwks[keyId]
 	if !ok {
 		return nil, fmt.Errorf("service account %q key %q not found at GET %q", keyId, serviceAccount, keyUrl)
 	}
-	return PublicKey(k.(string))
+
+	kStr, ok := kRaw.(string)
+	if !ok {
+		return nil, fmt.Errorf("unexpected error - decoded JSON key value %v is not string", kRaw)
+	}
+	return PublicKey(kStr)
 }
 
 // OAuth2RSAPublicKey returns the PEM key file string for Google Oauth2 public cert for the given 'kid' id.
@@ -179,9 +187,14 @@ func OAuth2RSAPublicKey(ctx context.Context, keyId string) (interface{}, error) 
 	if err := json.NewDecoder(res.Body).Decode(&jwks); err != nil {
 		return nil, fmt.Errorf("unable to decode JSON response: %v", err)
 	}
-	k, ok := jwks[keyId]
+	kRaw, ok := jwks[keyId]
 	if !ok {
 		return nil, fmt.Errorf("key %q not found (GET %q)", keyId, certUrl)
 	}
-	return PublicKey(k.(string))
+
+	kStr, ok := kRaw.(string)
+	if !ok {
+		return nil, fmt.Errorf("unexpected error - decoded JSON key value %v is not string", kRaw)
+	}
+	return PublicKey(kStr)
 }

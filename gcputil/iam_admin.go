@@ -7,8 +7,9 @@ import (
 )
 
 const (
-	// ServiceAccountTemplate is used with Google IAM v1 and is deprecated. Use
-	// ServiceAccountCredentialsTemplate with  Service Account Credentials API v1
+	// ServiceAccountTemplate is used with Google IAM v1. 
+	//
+	// Deprecated: Use ServiceAccountCredentialsTemplate with Service Account Credentials API v1
 	// instead. See https://cloud.google.com/iam/docs/migrating-to-credentials-api
 	// ServiceAccountTemplate is used with
 	// https://pkg.go.dev/google.golang.org/api@v0.3.0/iam/v1

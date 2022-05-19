@@ -159,8 +159,8 @@ func PublicKey(pemString string) (interface{}, error) {
 // ServiceAccountPublicKey returns the public key with the given key ID for
 // the given service account if it exists. If the key does not exist, an error
 // is returned.
-func ServiceAccountPublicKey(ctx context.Context, serviceAccount, keyID string) (interface{}, error) {
-	return ServiceAccountPublicKeyWithEndpoint(ctx, serviceAccount, keyID, "")
+func ServiceAccountPublicKey(serviceAccount string, keyId string) (interface{}, error) {
+	return ServiceAccountPublicKeyWithEndpoint(context.Background(), serviceAccount, keyId, "")
 }
 
 // ServiceAccountPublicKeyWithEndpoint returns the public key with the given key

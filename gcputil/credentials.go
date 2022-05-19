@@ -175,11 +175,11 @@ func ServiceAccountPublicKeyWithEndpoint(ctx context.Context, serviceAccount, ke
 
 	keyURLPath := fmt.Sprintf(serviceAccountPublicKeyURLPathTemplate, url.PathEscape(serviceAccount))
 	keyURL := strings.TrimSuffix(endpoint, "/") + keyURLPath
-	req, err := http.NewRequest(http.MethodGet, keyURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, keyURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := cleanhttp.DefaultClient().Do(req.WithContext(ctx))
+	resp, err := cleanhttp.DefaultClient().Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -222,11 +222,11 @@ func OAuth2RSAPublicKeyWithEndpoint(ctx context.Context, keyID, endpoint string)
 	}
 
 	certUrl := strings.TrimSuffix(endpoint, "/") + googleOAuthProviderX509CertURLPath
-	req, err := http.NewRequest(http.MethodGet, certUrl, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, certUrl, nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := cleanhttp.DefaultClient().Do(req.WithContext(ctx))
+	resp, err := cleanhttp.DefaultClient().Do(req)
 	if err != nil {
 		return nil, err
 	}

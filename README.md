@@ -5,8 +5,8 @@ Utilities for Vault and GCP integrations. Includes helpers for:
 - Various helpers for some GCP APIs
 
 This library was created to be shared by Vault-GCP integrations including the:
-- [GCP Auth Method](https://github.com/emilymye/vault-plugin-auth-gcp)
-- [GCP Secrets Engine](https://github.com/emilymye/vault-plugin-secrets-gcp)
+- [GCP Auth Method](https://github.com/hashicorp/vault-plugin-auth-gcp)
+- [GCP Secrets Engine](https://github.com/hashicorp/vault-plugin-secrets-gcp)
 
 ## Usage:
 

@@ -1,6 +1,6 @@
 module github.com/hashicorp/go-gcp-common
 
-go 1.12
+go 1.15
 
 require (
 	github.com/hashicorp/go-cleanhttp v0.5.1

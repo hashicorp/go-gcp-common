@@ -1,6 +1,7 @@
 package gcputil
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"time"
@@ -71,11 +72,13 @@ type GCEIdentityMetadata struct {
 	CreatedAt int64 `json:"instance_creation_timestamp" structs:"instance_creation_timestamp" mapstructure:"instance_creation_timestamp"`
 }
 
-// GetVerifiedInstance returns the Instance as described by the identity metadata or an error.
+// GetVerifiedInstanceWithContext returns the Instance as described by the identity metadata or an error.
 // If the instance has an invalid status or its creation timestamp does not match the metadata value,
 // this  will return nil and an error.
-func (meta *GCEIdentityMetadata) GetVerifiedInstance(gceClient *compute.Service) (*compute.Instance, error) {
-	instance, err := gceClient.Instances.Get(meta.ProjectId, meta.Zone, meta.InstanceName).Do()
+func (meta *GCEIdentityMetadata) GetVerifiedInstanceWithContext(ctx context.Context, gceClient *compute.Service) (*compute.Instance, error) {
+	req := gceClient.Instances.Get(meta.ProjectId, meta.Zone, meta.InstanceName).Context(ctx)
+	req.Header().Set("Host", "compute.googleapis.com")
+	instance, err := req.Do()
 	if err != nil {
 		return nil, fmt.Errorf("unable to find instance associated with token: %v", err)
 	}
@@ -99,6 +102,13 @@ func (meta *GCEIdentityMetadata) GetVerifiedInstance(gceClient *compute.Service)
 		return nil, fmt.Errorf("metadata instance_creation_timestamp %d is before instance's creation time %d", actualTime.Unix(), metaTime.Unix())
 	}
 	return instance, nil
+}
+
+// GetVerifiedInstance returns the Instance as described by the identity metadata or an error.
+// If the instance has an invalid status or its creation timestamp does not match the metadata value,
+// this  will return nil and an error.
+func (meta *GCEIdentityMetadata) GetVerifiedInstance(gceClient *compute.Service) (*compute.Instance, error) {
+	return meta.GetVerifiedInstanceWithContext(context.Background(), gceClient)
 }
 
 var validInstanceStates map[string]struct{} = map[string]struct{}{

@@ -1,6 +1,7 @@
 package gcputil
 
 import (
+	"context"
 	"fmt"
 
 	"google.golang.org/api/iam/v1"
@@ -41,22 +42,39 @@ func (id *ServiceAccountKeyId) ResourceName() string {
 	return fmt.Sprintf(ServiceAccountKeyTemplate, id.Project, id.EmailOrId, id.Key)
 }
 
-// ServiceAccount wraps a call to the GCP IAM API to get a service account.
-func ServiceAccount(iamClient *iam.Service, accountId *ServiceAccountId) (*iam.ServiceAccount, error) {
-	account, err := iamClient.Projects.ServiceAccounts.Get(accountId.ResourceName()).Do()
+// ServiceAccountWithContext wraps a call to the GCP IAM API to get a service account.
+func ServiceAccountWithContext(ctx context.Context, iamClient *iam.Service, accountId *ServiceAccountId) (*iam.ServiceAccount, error) {
+	saResource := accountId.ResourceName()
+	req := iamClient.Projects.ServiceAccounts.Get(saResource).Context(ctx)
+	req.Header().Set("Host", "iam.googleapis.com")
+	account, err := req.Do()
 	if err != nil {
-		return nil, fmt.Errorf("could not find service account '%s': %v", accountId.ResourceName(), err)
+		return nil, fmt.Errorf("could not find service account %q: %v", saResource, err)
 	}
 
 	return account, nil
 }
 
+// ServiceAccount wraps a call to the GCP IAM API to get a service account.
+func ServiceAccount(iamClient *iam.Service, accountId *ServiceAccountId) (*iam.ServiceAccount, error) {
+	return ServiceAccountWithContext(context.Background(), iamClient, accountId)
+}
+
+// ServiceAccountKeyWithContext wraps a call to the GCP IAM API to get a service account key.
+func ServiceAccountKeyWithContext(ctx context.Context, iamClient *iam.Service, keyId *ServiceAccountKeyId) (*iam.ServiceAccountKey, error) {
+	keyResource := keyId.ResourceName()
+	req := iamClient.Projects.ServiceAccounts.Keys.Get(keyResource).
+		PublicKeyType(ServiceAccountKeyFileType).Context(ctx)
+	req.Header().Set("Host", "iam.googleapis.com")
+	key, err := req.Do()
+	if err != nil {
+		return nil, fmt.Errorf("could not find service account key %q: %v", keyResource, err)
+	}
+
+	return key, nil
+}
+
 // ServiceAccountKey wraps a call to the GCP IAM API to get a service account key.
 func ServiceAccountKey(iamClient *iam.Service, keyId *ServiceAccountKeyId) (*iam.ServiceAccountKey, error) {
-	keyResource := keyId.ResourceName()
-	key, err := iamClient.Projects.ServiceAccounts.Keys.Get(keyId.ResourceName()).PublicKeyType(ServiceAccountKeyFileType).Do()
-	if err != nil {
-		return nil, fmt.Errorf("could not find service account key '%s': %v", keyResource, err)
-	}
-	return key, nil
+	return ServiceAccountKeyWithContext(context.Background(), iamClient, keyId)
 }

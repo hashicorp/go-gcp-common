@@ -228,7 +228,7 @@ func OAuth2RSAPublicKeyWithEndpoint(ctx context.Context, keyID, endpoint string)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Host", "www.googleapis.com")
+	req.Host = "www.googleapis.com"
 
 	resp, err := cleanhttp.DefaultClient().Do(req)
 	if err != nil {

@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/hashicorp/go-cleanhttp"
 	"github.com/mitchellh/go-homedir"
@@ -48,6 +49,85 @@ type GcpCredentials struct {
 	PrivateKeyId string `json:"private_key_id" structs:"private_key_id" mapstructure:"private_key_id"`
 	PrivateKey   string `json:"private_key" structs:"private_key" mapstructure:"private_key"`
 	ProjectId    string `json:"project_id" structs:"project_id" mapstructure:"project_id"`
+}
+
+type ExternalAccountCredential struct {
+	// External Account fields
+	Audience string `json:"audience"`
+	// ProjectID is needed for retrieving *google.Credentials object
+	ProjectID string `json:"project_id"`
+	// TODO figure out if this is needed
+	ServiceAccountImpersonationURL string   `json:"service_account_impersonation_url"`
+	SubjectTokenType               string   `json:"subject_token_type"`
+	TokenURL                       string   `json:"token_url"`
+	Scopes                         []string `json:"scopes"`
+	WorkloadIdentityToken          string   `json:"workload_identity_token"`
+}
+
+func (c *ExternalAccountCredential) TokenSource(ctx context.Context) (oauth2.TokenSource, error) {
+	ts := tokenSource{
+		ctx:    ctx,
+		config: c,
+	}
+	return oauth2.ReuseTokenSource(nil, ts), nil
+}
+
+func (c *ExternalAccountCredential) GetCredentials(ctx context.Context) (*google.Credentials, error) {
+
+	ts, err := c.TokenSource(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	fmt.Printf("Getting Credential for project ID: %s\n", c.ProjectID)
+	return &google.Credentials{
+		ProjectID:   c.ProjectID,
+		TokenSource: ts,
+	}, nil
+}
+
+// tokenSource is the source that handles external credentials. It is used to retrieve Tokens.
+type tokenSource struct {
+	ctx    context.Context
+	config *ExternalAccountCredential
+}
+
+// Token allows tokenSource to conform to the oauth2.TokenSource interface.
+func (ts tokenSource) Token() (*oauth2.Token, error) {
+	stsRequest := TokenExchangeRequest{
+		GrantType:          "urn:ietf:params:oauth:grant-type:token-exchange",
+		Audience:           ts.config.Audience,
+		Scope:              ts.config.Scopes,
+		RequestedTokenType: "urn:ietf:params:oauth:token-type:access_token",
+		// plugin identity token fetched over system view
+		SubjectToken:     ts.config.WorkloadIdentityToken,
+		SubjectTokenType: ts.config.SubjectTokenType,
+	}
+	header := make(http.Header)
+	header.Add("Content-Type", "application/x-www-form-urlencoded")
+	//header.Add("x-goog-api-client", getMetricsHeaderValue(conf, credSource))
+	var options map[string]interface{}
+	stsResp, err := ExchangeToken(ts.ctx, ts.config.TokenURL, &stsRequest, header, options)
+	if err != nil {
+		return nil, err
+	}
+
+	accessToken := &oauth2.Token{
+		AccessToken: stsResp.AccessToken,
+		TokenType:   stsResp.TokenType,
+	}
+	if stsResp.ExpiresIn < 0 {
+		return nil, fmt.Errorf("oauth2/google: got invalid expiry from security token service")
+	} else if stsResp.ExpiresIn >= 0 {
+		accessToken.Expiry = time.Now().Add(time.Duration(stsResp.ExpiresIn) * time.Second)
+	}
+
+	if stsResp.RefreshToken != "" {
+		accessToken.RefreshToken = stsResp.RefreshToken
+	}
+
+	fmt.Printf("Received access token: %+v", accessToken)
+	return accessToken, nil
 }
 
 // FindCredentials attempts to obtain GCP credentials in the

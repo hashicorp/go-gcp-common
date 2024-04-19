@@ -162,10 +162,13 @@ func (ts tokenSource) obtainSACredential(stsToken *oauth2.Token) (*oauth2.Token,
 
 	// ex: 2024-04-18T22:26:02Z
 	t, err := time.Parse(time.RFC3339, resp.ExpireTime)
-	if t.Second() < 0 {
-		return nil, fmt.Errorf("iamCredentials/google: got invalid expiry from security token service")
-	} else if t.Second() >= 0 {
-		accessToken.Expiry = time.Now().Add(time.Duration(t.Second()) * time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("iamCredentials/google: unable to parse expiry time from response: %s", err)
+	}
+	if t.IsZero() {
+		return nil, fmt.Errorf("iamCredentials/google: got invalid expiry from IAM token service")
+	} else {
+		accessToken.Expiry = t
 	}
 
 	return accessToken, nil

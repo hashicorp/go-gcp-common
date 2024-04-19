@@ -31,8 +31,6 @@ const (
 	// https://cloud.google.com/apis/design/glossary#api_service_endpoint
 	defaultGoogleAPIsEndpoint = "https://www.googleapis.com"
 
-	iamCredentialsAPIsEndpoint = "https://iamcredentials.googleapis.com"
-
 	// serviceAccountPublicKeyURLPathTemplate is a templated URL path for obtaining the
 	// public keys associated with a service account. See details at
 	//   - https://cloud.google.com/iam/docs/creating-managing-service-account-keys
@@ -42,7 +40,19 @@ const (
 	// googleOAuthProviderX509CertURLPath is a URL path to Google's public OAuth keys.
 	// Using v1 returns the keys in X.509 certificate format.
 	googleOAuthProviderX509CertURLPath = "/oauth2/v1/certs"
+
+	// Default service endpoint for interaction with the IAM Credentials API
+	iamCredentialsAPIsEndpoint = "https://iamcredentials.googleapis.com"
+
+	// Default service endpoint for interaction with the STS Token API
+	stsTokenAPIEndpoint = "https://sts.googleapis.com/v1/token"
+
+	// defaultJWTSubjectTokenType is the token type expected by the STS API
+	// when requesting for STS Tokens
+	defaultJWTSubjectTokenType = "urn:ietf:params:oauth:token-type:jwt"
 )
+
+var defaultTokenAuthScopes = []string{"https://www.googleapis.com/auth/cloud-platform"}
 
 // GcpCredentials represents a simplified version of the Google Cloud Platform credentials file format.
 type GcpCredentials struct {
@@ -55,24 +65,20 @@ type GcpCredentials struct {
 
 type ExternalAccountCredential struct {
 	// External Account fields
-	Audience              string   `json:"audience"`
-	ServiceAccountEmail   string   `json:"service_account_email"`
-	SubjectTokenType      string   `json:"subject_token_type"`
-	TokenURL              string   `json:"token_url"`
-	Scopes                []string `json:"scopes"`
-	WorkloadIdentityToken string   `json:"workload_identity_token"`
+	Audience              string `json:"audience"`
+	ServiceAccountEmail   string `json:"service_account_email"`
+	WorkloadIdentityToken string `json:"workload_identity_token"`
 }
 
-func (c *ExternalAccountCredential) TokenSource(ctx context.Context) (oauth2.TokenSource, error) {
+func (c *ExternalAccountCredential) TokenSource() (oauth2.TokenSource, error) {
 	ts := tokenSource{
-		ctx:    ctx,
 		config: c,
 	}
 	return oauth2.ReuseTokenSource(nil, ts), nil
 }
 
-func (c *ExternalAccountCredential) GetCredentials(ctx context.Context) (*google.Credentials, error) {
-	ts, err := c.TokenSource(ctx)
+func (c *ExternalAccountCredential) GetCredentials() (*google.Credentials, error) {
+	ts, err := c.TokenSource()
 	if err != nil {
 		return nil, err
 	}
@@ -84,20 +90,20 @@ func (c *ExternalAccountCredential) GetCredentials(ctx context.Context) (*google
 
 // tokenSource is the source that handles external credentials. It is used to retrieve Tokens.
 type tokenSource struct {
-	ctx    context.Context
 	config *ExternalAccountCredential
 }
 
 // Token allows tokenSource to conform to the oauth2.TokenSource interface.
 func (ts tokenSource) Token() (*oauth2.Token, error) {
+	ctx := context.Background()
 	// Exchange Vault's Identity Token for a federated STS Token
-	stsToken, err := ts.obtainSTSToken()
+	stsToken, err := ts.obtainSTSToken(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	// Exchange federated token for IAM Credential Token for the Service Account
-	saCredential, err := ts.obtainSACredential(stsToken)
+	saCredential, err := ts.obtainSACredential(ctx, stsToken)
 	if err != nil {
 		return nil, err
 	}
@@ -105,20 +111,20 @@ func (ts tokenSource) Token() (*oauth2.Token, error) {
 	return saCredential, nil
 }
 
-func (ts tokenSource) obtainSTSToken() (*oauth2.Token, error) {
+func (ts tokenSource) obtainSTSToken(ctx context.Context) (*oauth2.Token, error) {
 	// This STS Token Exchange is modeled after Google's oauth2 library
 	// For reference, please visit the following
 	// https://github.com/golang/oauth2/blob/master/google/internal/stsexchange/sts_exchange.go
 	stsRequest := STSTokenExchangeRequest{
 		GrantType:          "urn:ietf:params:oauth:grant-type:token-exchange",
 		Audience:           ts.config.Audience,
-		Scope:              ts.config.Scopes,
+		Scope:              defaultTokenAuthScopes,
 		RequestedTokenType: "urn:ietf:params:oauth:token-type:access_token",
+		SubjectTokenType:   defaultJWTSubjectTokenType,
 		// plugin identity token fetched over system view
-		SubjectToken:     ts.config.WorkloadIdentityToken,
-		SubjectTokenType: ts.config.SubjectTokenType,
+		SubjectToken: ts.config.WorkloadIdentityToken,
 	}
-	stsResp, err := ExchangeSTSToken(ts.ctx, ts.config.TokenURL, &stsRequest)
+	stsResp, err := ExchangeSTSToken(ctx, stsTokenAPIEndpoint, &stsRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -140,8 +146,8 @@ func (ts tokenSource) obtainSTSToken() (*oauth2.Token, error) {
 	return accessToken, nil
 }
 
-func (ts tokenSource) obtainSACredential(stsToken *oauth2.Token) (*oauth2.Token, error) {
-	// make a cURL request to the Service Account Access Token endpoint
+func (ts tokenSource) obtainSACredential(ctx context.Context, stsToken *oauth2.Token) (*oauth2.Token, error) {
+	// make a request to the Service Account Access Token endpoint
 	endpoint := fmt.Sprintf("%s/v1/projects/-/serviceAccounts/%s:generateAccessToken",
 		iamCredentialsAPIsEndpoint, ts.config.ServiceAccountEmail)
 
@@ -151,7 +157,7 @@ func (ts tokenSource) obtainSACredential(stsToken *oauth2.Token) (*oauth2.Token,
 		STSAccessToken: stsToken.AccessToken,
 	}
 
-	resp, err := ExchangeServiceAccountToken(ts.ctx, endpoint, &stsRequest)
+	resp, err := ExchangeServiceAccountToken(ctx, endpoint, &stsRequest)
 	if err != nil {
 		return nil, err
 	}

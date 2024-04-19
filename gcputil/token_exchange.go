@@ -146,6 +146,8 @@ type IAMTokenExchangeRequest struct {
 }
 
 // IAMTokenResponse is used to decode the remote server response during an IAM token exchange.
+// Note: The response from the IAM Token API follows camel-case while the STS Token API
+// uses snake-case for the response keys.
 type IAMTokenResponse struct {
 	AccessToken string `json:"accessToken"`
 	ExpireTime  string `json:"expireTime"`

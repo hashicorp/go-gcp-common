@@ -63,21 +63,24 @@ type GcpCredentials struct {
 	ProjectId    string `json:"project_id" structs:"project_id" mapstructure:"project_id"`
 }
 
-type ExternalAccountCredential struct {
+type ExternalAccountConfig struct {
 	// External Account fields
-	Audience              string `json:"audience"`
-	ServiceAccountEmail   string `json:"service_account_email"`
-	WorkloadIdentityToken string `json:"workload_identity_token"`
+	Audience            string
+	TTL                 time.Duration
+	ServiceAccountEmail string
+	TokenFetcher        WebIdentityTokenFetcher
 }
 
-func (c *ExternalAccountCredential) TokenSource() (oauth2.TokenSource, error) {
+type WebIdentityTokenFetcher func(ctx context.Context, cfg *ExternalAccountConfig) (string, error)
+
+func (c *ExternalAccountConfig) TokenSource() (oauth2.TokenSource, error) {
 	ts := tokenSource{
 		config: c,
 	}
 	return oauth2.ReuseTokenSource(nil, ts), nil
 }
 
-func (c *ExternalAccountCredential) GetCredentials() (*google.Credentials, error) {
+func (c *ExternalAccountConfig) GetCredentials() (*google.Credentials, error) {
 	ts, err := c.TokenSource()
 	if err != nil {
 		return nil, err
@@ -90,14 +93,20 @@ func (c *ExternalAccountCredential) GetCredentials() (*google.Credentials, error
 
 // tokenSource is the source that handles external credentials. It is used to retrieve Tokens.
 type tokenSource struct {
-	config *ExternalAccountCredential
+	config *ExternalAccountConfig
 }
 
 // Token allows tokenSource to conform to the oauth2.TokenSource interface.
 func (ts tokenSource) Token() (*oauth2.Token, error) {
 	ctx := context.Background()
+	// Fetch Identity Token
+	pluginToken, err := ts.config.TokenFetcher(ctx, ts.config)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching ID Token from plugin system view: %v", err)
+	}
+
 	// Exchange Vault's Identity Token for a federated STS Token
-	stsToken, err := ts.obtainSTSToken(ctx)
+	stsToken, err := ts.obtainSTSToken(ctx, pluginToken)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +120,7 @@ func (ts tokenSource) Token() (*oauth2.Token, error) {
 	return saCredential, nil
 }
 
-func (ts tokenSource) obtainSTSToken(ctx context.Context) (*oauth2.Token, error) {
+func (ts tokenSource) obtainSTSToken(ctx context.Context, pluginToken string) (*oauth2.Token, error) {
 	// This STS Token Exchange is modeled after Google's oauth2 library
 	// For reference, please visit the following
 	// https://github.com/golang/oauth2/blob/master/google/internal/stsexchange/sts_exchange.go
@@ -122,7 +131,7 @@ func (ts tokenSource) obtainSTSToken(ctx context.Context) (*oauth2.Token, error)
 		RequestedTokenType: "urn:ietf:params:oauth:token-type:access_token",
 		SubjectTokenType:   defaultJWTSubjectTokenType,
 		// plugin identity token fetched over system view
-		SubjectToken: ts.config.WorkloadIdentityToken,
+		SubjectToken: pluginToken,
 	}
 	stsResp, err := ExchangeSTSToken(ctx, stsTokenAPIEndpoint, &stsRequest)
 	if err != nil {

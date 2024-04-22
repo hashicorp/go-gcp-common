@@ -161,8 +161,10 @@ func (ts tokenSource) obtainSACredential(ctx context.Context, stsToken *oauth2.T
 		iamCredentialsAPIsEndpoint, ts.config.ServiceAccountEmail)
 
 	scopes := []string{"https://www.googleapis.com/auth/cloud-platform"}
+	lifetime := fmt.Sprintf("%fs", ts.config.TTL.Seconds())
 	stsRequest := IAMTokenExchangeRequest{
 		Scope:          scopes,
+		Lifetime:       lifetime,
 		STSAccessToken: stsToken.AccessToken,
 	}
 

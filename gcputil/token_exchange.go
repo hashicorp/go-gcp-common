@@ -81,7 +81,8 @@ func makeSTSRequest(ctx context.Context, endpoint string, r *STSTokenExchangeReq
 func makeIAMRequest(ctx context.Context, endpoint string, r *IAMTokenExchangeRequest) (*IAMTokenResponse, error) {
 	c := cleanhttp.DefaultClient()
 	data := map[string]interface{}{
-		"scope": r.Scope,
+		"scope":    r.Scope,
+		"lifetime": r.Lifetime,
 	}
 	b, err := json.Marshal(data)
 	if err != nil {
@@ -142,6 +143,7 @@ type STSTokenResponse struct {
 // IAMTokenExchangeRequest contains fields necessary to make an IAM token exchange.
 type IAMTokenExchangeRequest struct {
 	Scope          []string
+	Lifetime       string
 	STSAccessToken string
 }
 

@@ -81,8 +81,10 @@ func makeSTSRequest(ctx context.Context, endpoint string, r *STSTokenExchangeReq
 func makeIAMRequest(ctx context.Context, endpoint string, r *IAMTokenExchangeRequest) (*IAMTokenResponse, error) {
 	c := cleanhttp.DefaultClient()
 	data := map[string]interface{}{
-		"scope":    r.Scope,
-		"lifetime": r.Lifetime,
+		"scope": r.Scope,
+	}
+	if r.Lifetime != "" {
+		data["lifetime"] = r.Lifetime
 	}
 	b, err := json.Marshal(data)
 	if err != nil {

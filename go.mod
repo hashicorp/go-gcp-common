@@ -5,7 +5,7 @@ go 1.17
 require (
 	github.com/hashicorp/go-cleanhttp v0.5.1
 	github.com/mitchellh/go-homedir v1.1.0
-	golang.org/x/oauth2 v0.15.0
+	golang.org/x/oauth2 v0.19.0
 	google.golang.org/api v0.126.0
 )
 

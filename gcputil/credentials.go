@@ -20,6 +20,7 @@ import (
 	"github.com/mitchellh/go-homedir"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
+	"golang.org/x/oauth2/google/externalaccount"
 	"golang.org/x/oauth2/jwt"
 	"google.golang.org/api/googleapi"
 )
@@ -44,9 +45,6 @@ const (
 	// Default service endpoint for interaction with the IAM Credentials API
 	iamCredentialsAPIsEndpoint = "https://iamcredentials.googleapis.com"
 
-	// Default service endpoint for interaction with the STS Token API
-	stsTokenAPIEndpoint = "https://sts.googleapis.com/v1/token"
-
 	// defaultJWTSubjectTokenType is the token type expected by the STS API
 	// when requesting for STS Tokens
 	defaultJWTSubjectTokenType = "urn:ietf:params:oauth:token-type:jwt"
@@ -68,20 +66,20 @@ type ExternalAccountConfig struct {
 	Audience            string
 	TTL                 time.Duration
 	ServiceAccountEmail string
-	TokenFetcher        WebIdentityTokenFetcher
+	TokenSupplier       externalaccount.SubjectTokenSupplier
 }
 
-type WebIdentityTokenFetcher func(ctx context.Context, cfg *ExternalAccountConfig) (string, error)
-
-func (c *ExternalAccountConfig) TokenSource() (oauth2.TokenSource, error) {
-	ts := tokenSource{
-		config: c,
+func (c *ExternalAccountConfig) GetExternalAccountCredentials(ctx context.Context) (*google.Credentials, error) {
+	config := externalaccount.Config{
+		Audience:                       strings.TrimPrefix(c.Audience, "https:"),
+		SubjectTokenType:               defaultJWTSubjectTokenType,
+		ServiceAccountImpersonationURL: fmt.Sprintf("%s/v1/projects/-/serviceAccounts/%s:generateAccessToken", iamCredentialsAPIsEndpoint, c.ServiceAccountEmail),
+		ServiceAccountImpersonationLifetimeSeconds: int(c.TTL.Seconds()),
+		SubjectTokenSupplier:                       c.TokenSupplier,
+		Scopes:                                     defaultTokenAuthScopes,
 	}
-	return oauth2.ReuseTokenSource(nil, ts), nil
-}
 
-func (c *ExternalAccountConfig) GetCredentials() (*google.Credentials, error) {
-	ts, err := c.TokenSource()
+	ts, err := externalaccount.NewTokenSource(ctx, config)
 	if err != nil {
 		return nil, err
 	}
@@ -89,110 +87,6 @@ func (c *ExternalAccountConfig) GetCredentials() (*google.Credentials, error) {
 	return &google.Credentials{
 		TokenSource: ts,
 	}, nil
-}
-
-// tokenSource is the source that handles external credentials. It is used to retrieve Tokens.
-type tokenSource struct {
-	config *ExternalAccountConfig
-}
-
-// Token allows tokenSource to conform to the oauth2.TokenSource interface.
-func (ts tokenSource) Token() (*oauth2.Token, error) {
-	ctx := context.Background()
-	// Fetch Identity Token
-	pluginToken, err := ts.config.TokenFetcher(ctx, ts.config)
-	if err != nil {
-		return nil, fmt.Errorf("error fetching ID Token from plugin system view: %v", err)
-	}
-
-	// Exchange Vault's Identity Token for a federated STS Token
-	stsToken, err := ts.obtainSTSToken(ctx, pluginToken)
-	if err != nil {
-		return nil, err
-	}
-
-	// Exchange federated token for IAM Credential Token for the Service Account
-	saCredential, err := ts.obtainSACredential(ctx, stsToken)
-	if err != nil {
-		return nil, err
-	}
-
-	return saCredential, nil
-}
-
-func (ts tokenSource) obtainSTSToken(ctx context.Context, pluginToken string) (*oauth2.Token, error) {
-	// This STS Token Exchange is modeled after Google's oauth2 library
-	// For reference, please visit the following
-	// https://github.com/golang/oauth2/blob/master/google/internal/stsexchange/sts_exchange.go
-	stsRequest := STSTokenExchangeRequest{
-		GrantType:          "urn:ietf:params:oauth:grant-type:token-exchange",
-		Audience:           ts.config.Audience,
-		Scope:              defaultTokenAuthScopes,
-		RequestedTokenType: "urn:ietf:params:oauth:token-type:access_token",
-		SubjectTokenType:   defaultJWTSubjectTokenType,
-		// plugin identity token fetched over system view
-		SubjectToken: pluginToken,
-	}
-	stsResp, err := ExchangeSTSToken(ctx, stsTokenAPIEndpoint, &stsRequest)
-	if err != nil {
-		return nil, err
-	}
-
-	accessToken := &oauth2.Token{
-		AccessToken: stsResp.AccessToken,
-		TokenType:   stsResp.TokenType,
-	}
-	if stsResp.ExpiresIn < 0 {
-		return nil, fmt.Errorf("sts/google: got invalid expiry from security token service")
-	} else if stsResp.ExpiresIn >= 0 {
-		accessToken.Expiry = time.Now().Add(time.Duration(stsResp.ExpiresIn) * time.Second)
-	}
-
-	if stsResp.RefreshToken != "" {
-		accessToken.RefreshToken = stsResp.RefreshToken
-	}
-
-	return accessToken, nil
-}
-
-func (ts tokenSource) obtainSACredential(ctx context.Context, stsToken *oauth2.Token) (*oauth2.Token, error) {
-	// make a request to the Service Account Access Token endpoint
-	endpoint := fmt.Sprintf("%s/v1/projects/-/serviceAccounts/%s:generateAccessToken",
-		iamCredentialsAPIsEndpoint, ts.config.ServiceAccountEmail)
-
-	scopes := []string{"https://www.googleapis.com/auth/cloud-platform"}
-	var lifetime string
-	if ts.config.TTL != 0 {
-		lifetime = fmt.Sprintf("%fs", ts.config.TTL.Seconds())
-	}
-
-	stsRequest := IAMTokenExchangeRequest{
-		Scope:          scopes,
-		Lifetime:       lifetime,
-		STSAccessToken: stsToken.AccessToken,
-	}
-
-	resp, err := ExchangeServiceAccountToken(ctx, endpoint, &stsRequest)
-	if err != nil {
-		return nil, err
-	}
-
-	accessToken := &oauth2.Token{
-		AccessToken: resp.AccessToken,
-	}
-
-	// ex: 2024-04-18T22:26:02Z
-	t, err := time.Parse(time.RFC3339, resp.ExpireTime)
-	if err != nil {
-		return nil, fmt.Errorf("iamCredentials/google: unable to parse expiry time from response: %s", err)
-	}
-	if t.IsZero() {
-		return nil, fmt.Errorf("iamCredentials/google: got invalid expiry from IAM token service")
-	} else {
-		accessToken.Expiry = t
-	}
-
-	return accessToken, nil
 }
 
 // FindCredentials attempts to obtain GCP credentials in the

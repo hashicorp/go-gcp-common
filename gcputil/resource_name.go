@@ -11,7 +11,7 @@ const (
 	resourceIdRegex   = "^[^\t\n\f\r]+$"
 	collectionIdRegex = "^[a-z][a-zA-Z]*$"
 
-	fullResourceNameRegex = "^//([a-z]+).googleapis.com/(.+)$"
+	fullResourceNameRegex = "^//([a-z]+)\\.googleapis\\.com/(.+)$"
 	selfLinkMarker        = "projects/"
 )
 

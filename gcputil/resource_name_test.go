@@ -58,6 +58,8 @@ func TestParseFullResourceName(t *testing.T) {
 		"not/a/real/link":                      {ShouldError: true},
 		"https://aselflink.com/v1/foo/A/bar/B": {ShouldError: true},
 		"https://a.fake.service.com/v1/foo/A/bar/B": {ShouldError: true},
+		"//aserviceXgoogleapis.com/foos/A/bars/B":   {ShouldError: true},
+		"//aservice.googleapisXcom/foos/A/bars/B":   {ShouldError: true},
 		"//aservice.googleapis.com/foos/A/bars/B": {
 			ShouldError: false,
 			Expected: &FullResourceName{

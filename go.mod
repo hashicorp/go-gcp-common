@@ -1,10 +1,11 @@
 module github.com/hashicorp/go-gcp-common
 
-go 1.23.0
+go 1.24.0
 
-toolchain go1.23.1
+toolchain go1.24.4
 
 require (
+	github.com/go-jose/go-jose/v4 v4.1.3
 	github.com/hashicorp/go-cleanhttp v0.5.1
 	github.com/mitchellh/go-homedir v1.1.0
 	golang.org/x/oauth2 v0.28.0

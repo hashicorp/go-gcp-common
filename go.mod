@@ -1,8 +1,8 @@
 module github.com/hashicorp/go-gcp-common
 
-go 1.24.0
+go 1.23.0
 
-toolchain go1.24.4
+toolchain go1.23.1
 
 require (
 	github.com/go-jose/go-jose/v4 v4.1.2

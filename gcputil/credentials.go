@@ -50,7 +50,7 @@ const (
 	openIDConfigurationPath = "/.well-known/openid-configuration"
 
 	// Default service endpoint for interaction with the IAM Credentials API
-	iamCredentialsAPIsEndpoint = "https://iamcredentials.googleapis.com"
+	defaultIAMCredentialsAPIsEndpoint = "https://iamcredentials.googleapis.com"
 
 	// defaultJWTSubjectTokenType is the token type expected by the STS API
 	// when requesting for STS Tokens
@@ -70,13 +70,20 @@ type GcpCredentials struct {
 
 type ExternalAccountConfig struct {
 	// External Account fields
-	Audience            string
-	TTL                 time.Duration
-	ServiceAccountEmail string
-	TokenSupplier       externalaccount.SubjectTokenSupplier
+	Audience                   string
+	TTL                        time.Duration
+	ServiceAccountEmail        string
+	TokenSupplier              externalaccount.SubjectTokenSupplier
+	TokenURL                   string
+	IAMCredentialsAPIsEndpoint string
 }
 
 func (c *ExternalAccountConfig) GetExternalAccountCredentials(ctx context.Context) (*google.Credentials, error) {
+	iamCredentialsAPIsEndpoint := c.IAMCredentialsAPIsEndpoint
+	if iamCredentialsAPIsEndpoint == "" {
+		iamCredentialsAPIsEndpoint = defaultIAMCredentialsAPIsEndpoint
+	}
+
 	config := externalaccount.Config{
 		Audience:                       strings.TrimPrefix(c.Audience, "https:"),
 		SubjectTokenType:               defaultJWTSubjectTokenType,
@@ -84,6 +91,7 @@ func (c *ExternalAccountConfig) GetExternalAccountCredentials(ctx context.Contex
 		ServiceAccountImpersonationLifetimeSeconds: int(c.TTL.Seconds()),
 		SubjectTokenSupplier:                       c.TokenSupplier,
 		Scopes:                                     defaultTokenAuthScopes,
+		TokenURL:                                   c.TokenURL,
 	}
 
 	ts, err := externalaccount.NewTokenSource(ctx, config)

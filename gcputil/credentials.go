@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -19,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-jose/go-jose/v4"
 	"github.com/hashicorp/go-cleanhttp"
 	"github.com/mitchellh/go-homedir"
 	"golang.org/x/oauth2"
@@ -41,12 +43,14 @@ const (
 	//   - https://cloud.google.com/iam/docs/reference/credentials/rest/v1/projects.serviceAccounts/signJwt#response-body
 	serviceAccountPublicKeyURLPathTemplate = "/service_accounts/v1/metadata/x509/%s?alt=json"
 
-	// googleOAuthProviderX509CertURLPath is a URL path to Google's public OAuth keys.
-	// Using v1 returns the keys in X.509 certificate format.
-	googleOAuthProviderX509CertURLPath = "/oauth2/v1/certs"
+	// Default Google Open ID connect issuer endpoint
+	defaultGoogleOpenIDEndpoint = "https://accounts.google.com"
+
+	// Open ID connect discovery path
+	openIDConfigurationPath = "/.well-known/openid-configuration"
 
 	// Default service endpoint for interaction with the IAM Credentials API
-	iamCredentialsAPIsEndpoint = "https://iamcredentials.googleapis.com"
+	defaultIAMCredentialsAPIsEndpoint = "https://iamcredentials.googleapis.com"
 
 	// defaultJWTSubjectTokenType is the token type expected by the STS API
 	// when requesting for STS Tokens
@@ -66,13 +70,20 @@ type GcpCredentials struct {
 
 type ExternalAccountConfig struct {
 	// External Account fields
-	Audience            string
-	TTL                 time.Duration
-	ServiceAccountEmail string
-	TokenSupplier       externalaccount.SubjectTokenSupplier
+	Audience                   string
+	TTL                        time.Duration
+	ServiceAccountEmail        string
+	TokenSupplier              externalaccount.SubjectTokenSupplier
+	TokenURL                   string
+	IAMCredentialsAPIsEndpoint string
 }
 
 func (c *ExternalAccountConfig) GetExternalAccountCredentials(ctx context.Context) (*google.Credentials, error) {
+	iamCredentialsAPIsEndpoint := c.IAMCredentialsAPIsEndpoint
+	if iamCredentialsAPIsEndpoint == "" {
+		iamCredentialsAPIsEndpoint = defaultIAMCredentialsAPIsEndpoint
+	}
+
 	config := externalaccount.Config{
 		Audience:                       strings.TrimPrefix(c.Audience, "https:"),
 		SubjectTokenType:               defaultJWTSubjectTokenType,
@@ -80,6 +91,7 @@ func (c *ExternalAccountConfig) GetExternalAccountCredentials(ctx context.Contex
 		ServiceAccountImpersonationLifetimeSeconds: int(c.TTL.Seconds()),
 		SubjectTokenSupplier:                       c.TokenSupplier,
 		Scopes:                                     defaultTokenAuthScopes,
+		TokenURL:                                   c.TokenURL,
 	}
 
 	ts, err := externalaccount.NewTokenSource(ctx, config)
@@ -253,18 +265,19 @@ func OAuth2RSAPublicKey(ctx context.Context, keyID string) (interface{}, error) 
 	return OAuth2RSAPublicKeyWithEndpoint(ctx, keyID, "")
 }
 
-// OAuth2RSAPublicKeyWithEndpoint returns the public key with the given key ID from
-// Google's public set of OAuth 2.0 keys. If endpoint is provided, it will be used as
-// the service endpoint for the request. If endpoint is not provided, a default of
-// "https://www.googleapis.com" will be used. If the key does not exist, an error is
-// returned.
+// OAuth2RSAPublicKeyWithEndpoint performs OpenID Connect Discovery to find the
+// JSON Web Key Set (JWKS) URL for the given OpenID Connect issuer endpoint,
+// fetches the keys, and returns the public key matching the specified key ID.
+// If issuer endpoint is not provided, a default of
+// "https://accounts.google.com" will be used. If the key does not exist, an
+// error is returned.
 func OAuth2RSAPublicKeyWithEndpoint(ctx context.Context, keyID, endpoint string) (interface{}, error) {
-	if endpoint == "" {
-		endpoint = defaultGoogleAPIsEndpoint
+	jwksEndpoint, err := jwksURL(ctx, endpoint)
+	if err != nil {
+		return nil, err
 	}
 
-	certUrl := strings.TrimSuffix(endpoint, "/") + googleOAuthProviderX509CertURLPath
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, certUrl, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, jwksEndpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -278,18 +291,62 @@ func OAuth2RSAPublicKeyWithEndpoint(ctx context.Context, keyID, endpoint string)
 		return nil, err
 	}
 
-	jwks := map[string]interface{}{}
-	if err := json.NewDecoder(resp.Body).Decode(&jwks); err != nil {
-		return nil, fmt.Errorf("unable to decode JSON response: %v", err)
-	}
-	kRaw, ok := jwks[keyID]
-	if !ok {
-		return nil, fmt.Errorf("key %q not found (GET %q)", keyID, certUrl)
+	jwksRaw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
 	}
 
-	kStr, ok := kRaw.(string)
-	if !ok {
-		return nil, fmt.Errorf("unexpected error - decoded JSON key value %v is not string", kRaw)
+	var jwks jose.JSONWebKeySet
+	if err := json.Unmarshal(jwksRaw, &jwks); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal JWKS JSON: %v", err)
 	}
-	return PublicKey(kStr)
+
+	keys := jwks.Key(keyID)
+	if len(keys) == 0 {
+		return nil, fmt.Errorf("key %q not found (GET %q)", keyID, jwksEndpoint)
+	}
+
+	// Specification states that a JWK Set "SHOULD" use distinct key IDs, but
+	// allows for some cases where they are not distinct, hence JSONWebKeySet.Key
+	// returns a slice. So, picking the first key from the slice.
+	jwkKey := keys[0]
+	if !jwkKey.Valid() {
+		return nil, fmt.Errorf("jwk is missing key material")
+	}
+	return jwkKey.Key, nil
+}
+
+func jwksURL(ctx context.Context, endpoint string) (string, error) {
+	if endpoint == "" {
+		endpoint = defaultGoogleOpenIDEndpoint
+	}
+	configURL := strings.TrimSuffix(endpoint, "/") + openIDConfigurationPath
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, configURL, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := cleanhttp.DefaultClient().Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if err := googleapi.CheckResponse(resp); err != nil {
+		return "", err
+	}
+
+	config := map[string]interface{}{}
+	if err := json.NewDecoder(resp.Body).Decode(&config); err != nil {
+		return "", fmt.Errorf("unable to decode JSON response: %v", err)
+	}
+	jwksUrlRaw, ok := config["jwks_uri"]
+	if !ok {
+		return "", fmt.Errorf("jwks_uri not found (GET %q)", configURL)
+	}
+	jwksUrl, ok := jwksUrlRaw.(string)
+	if !ok {
+		return "", fmt.Errorf("unexpected error - decoded JSON url value %v is not string", jwksUrlRaw)
+	}
+	return jwksUrl, nil
 }

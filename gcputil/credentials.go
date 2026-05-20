@@ -70,16 +70,25 @@ type ExternalAccountConfig struct {
 	TTL                 time.Duration
 	ServiceAccountEmail string
 	TokenSupplier       externalaccount.SubjectTokenSupplier
+	STSEndpoint         string
+	IAMCredsEndpoint    string
 }
 
 func (c *ExternalAccountConfig) GetExternalAccountCredentials(ctx context.Context) (*google.Credentials, error) {
+	// Use custom IAM Credentials endpoint if provided, otherwise use default
+	iamCredsEndpoint := iamCredentialsAPIsEndpoint
+	if c.IAMCredsEndpoint != "" {
+		iamCredsEndpoint = c.IAMCredsEndpoint
+	}
+
 	config := externalaccount.Config{
 		Audience:                       strings.TrimPrefix(c.Audience, "https:"),
 		SubjectTokenType:               defaultJWTSubjectTokenType,
-		ServiceAccountImpersonationURL: fmt.Sprintf("%s/v1/projects/-/serviceAccounts/%s:generateAccessToken", iamCredentialsAPIsEndpoint, c.ServiceAccountEmail),
+		ServiceAccountImpersonationURL: fmt.Sprintf("%s/v1/projects/-/serviceAccounts/%s:generateAccessToken", iamCredsEndpoint, c.ServiceAccountEmail),
 		ServiceAccountImpersonationLifetimeSeconds: int(c.TTL.Seconds()),
 		SubjectTokenSupplier:                       c.TokenSupplier,
 		Scopes:                                     defaultTokenAuthScopes,
+		TokenURL:                                   c.STSEndpoint,
 	}
 
 	ts, err := externalaccount.NewTokenSource(ctx, config)
